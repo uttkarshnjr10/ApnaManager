@@ -1,0 +1,85 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Diagnostic reports
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Dependency directories
+node_modules/
+jspm_packages/
+
+# Build output
+dist/
+build/
+.cache/
+.next/
+out/
+.tmp/
+
+# Optional eslint cache
+.eslintcache
+
+# Optional stylelint cache
+.stylelintcache
+
+# Microbundle cache
+.rpt2_cache/
+.rts2_cache_cjs/
+.rts2_cache_es/
+.rts2_cache_umd/
+
+# Parcel cache
+.cache/
+.parcel-cache/
+
+# Vite cache
+vite.config.ts.timestamp-*
+vite.config.mjs.timestamp-*
+
+# Rollup cache
+.rollup.cache/
+
+# FuseBox cache
+.fusebox/
+
+# Snowpack
+web_modules/
+
+# TypeScript cache
+*.tsbuildinfo
+*.tsbuildinfo.*
+
+# Yarn Integrity file
+.yarn-integrity
+
+# dotenv environment files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production
+.env.production.local
+
+# Firebase cache
+.firebase/
+
+# VSCode
+.vscode/
+.idea/
+
+# Mac / Windows system files
+.DS_Store
+Thumbs.db
+google-credentials.json
