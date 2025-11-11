@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
-const crypto = require('crypto');
+const crypto = require('crypto'); 
 
 const options = {
   timestamps: true,
@@ -31,7 +31,7 @@ const baseUserSchema = new mongoose.Schema(
       type: String,
       required: [true, 'password is required'],
       minlength: [6, 'password must be at least 6 characters long'],
-      select: false, // hide password from queries by default
+      select: false, 
     },
     passwordChangeRequired: {
       type: Boolean,
@@ -42,10 +42,11 @@ const baseUserSchema = new mongoose.Schema(
       enum: ['Active', 'Suspended'],
       default: 'Active',
     },
+    
     passwordResetToken: String,
     passwordResetExpires: Date,
   },
-  options // Pass options here
+  options
 );
 
 baseUserSchema.pre('save', async function (next) {
@@ -61,31 +62,52 @@ baseUserSchema.methods.matchPassword = async function (enteredPassword) {
 
 baseUserSchema.methods.createPasswordResetToken = function() {
   const resetToken = crypto.randomBytes(32).toString('hex');
+
   this.passwordResetToken = crypto
     .createHash('sha256')
     .update(resetToken)
     .digest('hex');
-  this.passwordResetExpires = Date.now() + 10 * 60 * 1000;
-  return resetToken;
+
+  this.passwordResetExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
+
+  return resetToken; // Return the unhashed token
 };
 
-//used for authentication (login, protect middleware)
+
 const User = mongoose.model('User', baseUserSchema);
 
 // 'Hotel' Discriminator
-// It inherits everything from baseUserSchema and adds these fields:
+
 const HotelUser = User.discriminator(
   'Hotel',
   new mongoose.Schema({
+    // Fields from inquiry
     hotelName: { type: String, trim: true, required: true },
-    city: { type: String, trim: true, required: true },
-    address: { type: String, trim: true },
-    phone: { type: String, trim: true },
+    ownerName: { type: String, trim: true },
+    gstNumber: { type: String, trim: true },
+    phone: { type: String, trim: true },       
+    address: { type: String, trim: true },     
+    state: { type: String, trim: true },
+    pinCode: { type: String, trim: true },
+    nationality: { type: String, trim: true, default: 'Indian' },
+    postOffice: { type: String, trim: true },
+    localThana: { type: String, trim: true },
+    pinLocation: { type: String, trim: true }, 
+    ownerSignature: {
+        public_id: String,
+        url: String,
+    },
+    hotelStamp: {
+        public_id: String,
+        url: String,
+    },
+    aadhaarCard: {
+        public_id: String,
+        url: String,
+    },
   })
 );
 
-//  'Police' Discriminator
-// It inherits everything from baseUserSchema and adds these fields:
 const PoliceUser = User.discriminator(
   'Police',
   new mongoose.Schema({
@@ -102,7 +124,6 @@ const PoliceUser = User.discriminator(
 );
 
 // 'Regional Admin' Discriminator
-// It inherits from baseUserSchema but adds no extra fields.
 const RegionalAdminUser = User.discriminator(
   'Regional Admin',
   new mongoose.Schema({})
