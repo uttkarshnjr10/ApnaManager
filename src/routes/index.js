@@ -12,6 +12,7 @@ const policeStationRoutes = require('./policeStation.routes');
 const uploadRoutes = require('./upload.routes');
 const userRoutes = require('./user.routes');
 const autocompleteRoutes = require('./autocomplete.routes');
+const paymentRoutes = require('./payment.routes.js');
 
 router.use('/auth', authRoutes);
 router.use('/guests', guestRoutes);
@@ -23,5 +24,6 @@ router.use('/stations', policeStationRoutes);
 router.use('/upload', uploadRoutes);
 router.use('/users', userRoutes);
 router.use('/autocomplete', autocompleteRoutes);
+router.use('/payments', paymentRoutes);
 
 module.exports = router;

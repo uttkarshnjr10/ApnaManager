@@ -105,6 +105,19 @@ const HotelUser = User.discriminator(
         public_id: String,
         url: String,
     },
+
+    stripeCustomerId: {
+        type: String,
+        trim: true,
+    },
+    subscriptionStatus: {
+        type: String,
+        enum: ['Active', 'Canceled', 'Past Due', 'Inactive'],
+        default: 'Inactive',
+    },
+    subscriptionPeriodEnd: {
+        type: Date,
+    },
   })
 );
 
