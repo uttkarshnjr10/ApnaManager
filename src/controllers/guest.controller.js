@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const Guest = require('../models/Guest.model');
+const { HotelUser, PoliceUser } = require('../models/User.model');
 const asyncHandler = require('express-async-handler');
 const logger = require('../utils/logger');
 const generateGuestPDF = require('../utils/pdfGenerator');
@@ -7,23 +8,79 @@ const { generateGuestReportCSV } = require('../utils/reportGenerator');
 const { sendCheckoutEmail } = require('../utils/sendEmail');
 const ApiError = require('../utils/ApiError');
 const ApiResponse = require('../utils/ApiResponse');
-const { HotelUser } = require('../models/User.model');
+const Watchlist = require('../models/Watchlist.model');
+const Alert = require('../models/Alert.model');
+const Notification = require('../models/Notification.model');
+const PoliceStation = require('../models/PoliceStation.model');
 
-// Helper function to calculate age from Date of Birth
-const calculateAge = (dob) => {
-    if (!dob) return 99; 
-    const birthDate = new Date(dob);
-    const today = new Date();
-    let age = today.getFullYear() - birthDate.getFullYear();
-    const m = today.getMonth() - birthDate.getMonth();
-    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
-        age--;
+const checkWatchlistAndNotify = async (guest, hotel) => {
+    try {
+        const idNumber = guest.idNumber;
+        const phone = guest.primaryGuest.phone;
+
+        const match = await Watchlist.findOne({
+            $or: [{ value: idNumber }, { value: phone }]
+        }).populate('addedBy', 'username');
+
+        if (!match) {
+            return;
+        }
+
+        logger.warn(`WATCHLIST MATCH: Guest ${guest.primaryGuest.name} (ID: ${idNumber}) matched watchlist item (Reason: ${match.reason})`);
+
+        const alertReason = `AUTOMATIC FLAG: Guest matched watchlist. Reason: "${match.reason}" (Match on: ${match.type})`;
+        
+        await Alert.create({
+            guest: guest._id,
+            reason: alertReason,
+            createdBy: match.addedBy._id,
+            status: 'Open',
+        });
+
+        const hotelPincode = hotel.pinCode;
+        if (!hotelPincode) {
+            logger.error(`Hotel ${hotel.hotelName} has no pincode. Cannot notify police.`);
+            return;
+        }
+
+        const station = await PoliceStation.findOne({ pincodes: hotelPincode });
+        if (!station) {
+            logger.warn(`No police station found with jurisdiction over pincode ${hotelPincode}.`);
+            return;
+        }
+
+        const officers = await PoliceUser.find({ policeStation: station._id });
+        if (officers.length === 0) {
+            logger.warn(`No officers found for station ${station.name}.`);
+            return;
+        }
+
+        const notificationMessage = `WATCHLIST MATCH: ${guest.primaryGuest.name} checked into ${hotel.hotelName} (Reason: ${match.reason})`;
+        
+        const notificationPromises = officers.map(officer => {
+            return Notification.create({
+                recipientStation: station._id,
+                recipientUser: officer._id,
+                message: notificationMessage,
+                isRead: false,
+            });
+        });
+
+        await Promise.all(notificationPromises);
+        logger.info(`Sent ${officers.length} notifications to ${station.name} about watchlist match.`);
+
+    } catch (error) {
+        logger.error(`Failed to execute watchlist check: ${error.message}`);
     }
-    return age;
 };
 
 const registerGuest = asyncHandler(async (req, res) => {
     const hotelUserId = req.user._id;
+    const hotel = await HotelUser.findById(hotelUserId);
+    if (!hotel) {
+        throw new ApiError(404, 'Hotel user not found');
+    }
+
     const filesMap = (req.files || []).reduce((map, file) => {
         map[file.fieldname] = file;
         return map;
@@ -45,27 +102,6 @@ const registerGuest = asyncHandler(async (req, res) => {
     if (!idImageFrontURL || !idImageBackURL || !livePhotoURL) {
         throw new ApiError(400, 'image upload failed. front, back, and live photos are required');
     }
-    const hotel = await HotelUser.findById(hotelUserId);
-    if (!hotel) {
-        throw new ApiError(404, 'Hotel user not found');
-    }
-    const stayDetailsData = {
-        purposeOfVisit: req.body.purposeOfVisit,
-        checkIn: req.body.checkIn,
-        expectedCheckout: req.body.expectedCheckout,
-        roomNumber: req.body.roomNumber,
-    };
-    if (!stayDetailsData.roomNumber) {
-        throw new ApiError(400, 'Room number is required');
-    }
-   
-    const roomToOccupy = hotel.rooms.find(r => r.roomNumber === stayDetailsData.roomNumber);
-    if (!roomToOccupy) {
-        throw new ApiError(404, `Room "${stayDetailsData.roomNumber}" does not exist for this hotel.`);
-    }
-    if (roomToOccupy.status === 'Occupied') {
-        throw new ApiError(400, `Room "${stayDetailsData.roomNumber}" is already occupied.`);
-    }
     const primaryGuestData = {
         name: req.body.primaryGuestName,
         dob: req.body.primaryGuestDob,
@@ -80,13 +116,30 @@ const registerGuest = asyncHandler(async (req, res) => {
         },
         nationality: req.body.primaryGuestNationality
     };
+    const stayDetailsData = {
+        purposeOfVisit: req.body.purposeOfVisit,
+        checkIn: req.body.checkIn,
+        expectedCheckout: req.body.expectedCheckout,
+        roomNumber: req.body.roomNumber,
+    };
+   
+    if (!stayDetailsData.roomNumber) {
+        throw new ApiError(400, 'Room number is required');
+    }
+    const roomToOccupy = hotel.rooms.find(r => r.roomNumber === stayDetailsData.roomNumber);
+    if (!roomToOccupy) {
+        throw new ApiError(404, `Room "${stayDetailsData.roomNumber}" does not exist for this hotel.`);
+    }
+    if (roomToOccupy.status === 'Occupied') {
+        throw new ApiError(400, `Room "${stayDetailsData.roomNumber}" is already occupied.`);
+    }
+
     const accompanyingGuestsRaw = parseMaybeJson(req.body.accompanyingGuests, []);
     const accompanyingGuests = {
         adults: [],
         children: [],
     };
     (accompanyingGuestsRaw || []).forEach((guest, index) => {
-        
         const processedGuest = {
             ...guest,
             idImageFrontURL: filesMap[`accompanying_${index}_idImageFront`]?.path,
@@ -119,12 +172,28 @@ const registerGuest = asyncHandler(async (req, res) => {
         stayDetails: stayDetailsData,
         hotel: hotelUserId,
     });
+   
     roomToOccupy.status = 'Occupied';
     roomToOccupy.guestId = guest._id;
     await hotel.save();
+    
     logger.info(`new guest registered (${guest.customerId}) in room ${stayDetailsData.roomNumber} at ${req.user.username}`);
     res.status(201).json(new ApiResponse(201, guest, "guest registered successfully!"));
+
+    checkWatchlistAndNotify(guest, hotel);
 });
+
+const calculateAge = (dob) => {
+    if (!dob) return 99; 
+    const birthDate = new Date(dob);
+    const today = new Date();
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const m = today.getMonth() - birthDate.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < today.getDate())) {
+        age--;
+    }
+    return age;
+};
 
 const getAllGuests = asyncHandler(async (req, res) => {
     const hotelUserId = req.user._id;
@@ -180,12 +249,13 @@ const checkoutGuest = asyncHandler(async (req, res) => {
 
     guest.status = 'Checked-Out';
     await guest.save();
+
     try {
         const hotel = await HotelUser.findById(guest.hotel._id);
         if (hotel) {
             const roomNumber = guest.stayDetails.roomNumber;
             const roomToVacate = hotel.rooms.find(r => r.roomNumber === roomNumber);
-           
+            
             if (roomToVacate) {
                 roomToVacate.status = 'Vacant';
                 roomToVacate.guestId = null;
@@ -198,6 +268,7 @@ const checkoutGuest = asyncHandler(async (req, res) => {
     } catch (roomError) {
         logger.error(`Failed to update room status on checkout: ${roomError.message}`);
     }
+
     logger.info(`guest ${guest.customerId} checked out by ${req.user.username}`);
 
     res.status(200).json(new ApiResponse(200, null, 'guest checked out successfully. receipt has been emailed.'));
@@ -217,7 +288,6 @@ const checkoutGuest = asyncHandler(async (req, res) => {
         }
     });
 });
-
 
 const generateGuestReport = asyncHandler(async (req, res) => {
     const hotelUserId = req.user._id;

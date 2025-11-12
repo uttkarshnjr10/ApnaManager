@@ -7,7 +7,11 @@ const {
     getAlerts,
     resolveAlert,
     getGuestHistory,
-    addRemark
+    addRemark,
+    createCaseReport, 
+    getCaseReports,
+    getHotelList,        
+    advancedGuestSearch,
 } = require('../controllers/police.controller');
 const { protect, authorize } = require('../middleware/auth.middleware');
 
@@ -19,5 +23,12 @@ router.route('/alerts').post(createAlert).get(getAlerts);
 router.put('/alerts/:id/resolve', resolveAlert);
 router.get('/guests/:id/history', getGuestHistory);
 router.post('/guests/:id/remarks', addRemark);
+
+router.route('/reports')
+    .get(getCaseReports)
+    .post(createCaseReport);
+
+router.get('/hotel-list', getHotelList);
+router.post('/analytics-search', advancedGuestSearch);
 
 module.exports = router;

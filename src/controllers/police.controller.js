@@ -3,6 +3,7 @@ const AccessLog = require('../models/AccessLog.model');
 const { User, HotelUser } = require('../models/User.model');
 const Alert = require('../models/Alert.model'); 
 const Remark = require('../models/Remark.model');
+const CaseReport = require('../models/CaseReport.model');
 const asyncHandler = require('express-async-handler');
 const logger = require('../utils/logger');
 const ApiError = require('../utils/ApiError');
@@ -175,6 +176,66 @@ const addRemark = asyncHandler(async (req, res) => {
     .json(new ApiResponse(201, populatedRemark, 'remark added successfully'));
 });
 
+const createCaseReport = asyncHandler(async (req, res) => {
+    const { title, summary, guestId } = req.body;
+    if (!title || !summary) {
+        throw new ApiError(400, 'Title and summary are required for the report');
+    }
+    const report = await CaseReport.create({
+        title,
+        summary,
+        officer: req.user._id,
+        guest: guestId || null,
+    });
+    res.status(201).json(new ApiResponse(201, report, 'Case report filed successfully'));
+});
+
+const getCaseReports = asyncHandler(async (req, res) => {
+    const reports = await CaseReport.find({ officer: req.user._id })
+        .populate('officer', 'username rank')
+        .populate('guest', 'primaryGuest.name')
+        .sort({ createdAt: -1 });
+    res.status(200).json(new ApiResponse(200, reports));
+});
+
+const getHotelList = asyncHandler(async (req, res) => {
+    const hotels = await HotelUser.find({ status: 'Active' })
+        .select('hotelName city')
+        .sort('hotelName');
+    res.status(200).json(new ApiResponse(200, hotels));
+});
+
+const advancedGuestSearch = asyncHandler(async (req, res) => {
+    const { hotel, city, state, purposeOfVisit, dateFrom, dateTo } = req.body;
+   
+    let query = {};
+    let hotelQuery = {};
+    if (dateFrom || dateTo) {
+        query.registrationTimestamp = {};
+        if (dateFrom) query.registrationTimestamp.$gte = new Date(dateFrom);
+        if (dateTo) query.registrationTimestamp.$lte = new Date(dateTo);
+    }
+    if (purposeOfVisit) {
+        query['stayDetails.purposeOfVisit'] = new RegExp(purposeOfVisit, 'i');
+    }
+    if (hotel) {
+        query.hotel = hotel;
+    } else if (city || state) {
+        if (city) hotelQuery.city = new RegExp(city, 'i');
+        if (state) hotelQuery.state = new RegExp(state, 'i');
+       
+        const matchingHotels = await HotelUser.find(hotelQuery).select('_id');
+        const hotelIds = matchingHotels.map(h => h._id);
+       
+        query.hotel = { $in: hotelIds };
+    }
+    const guests = await Guest.find(query)
+        .populate('hotel', 'hotelName city')
+        .sort({ registrationTimestamp: -1 })
+        .limit(100);
+    res.status(200).json(new ApiResponse(200, guests));
+});
+
 module.exports = {
     searchGuests,
     getDashboardData,
@@ -183,4 +244,8 @@ module.exports = {
     resolveAlert,
     getGuestHistory,
     addRemark,
+    createCaseReport,
+    getCaseReports,
+    getHotelList,
+    advancedGuestSearch,
 };
