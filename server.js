@@ -1,5 +1,6 @@
 const express = require('express');
 const dotenv = require('dotenv');
+const cookieParser = require('cookie-parser');
 dotenv.config();
 
 const cors = require('cors');
@@ -19,25 +20,28 @@ connectRedis();
 const app = express();
 
 //CORS Setup
-const allowedOrigins =
-        process.env.CORS_ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'];
+const allowedOrigins = 
+         process.env.CORS_ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'];
 
 
 const corsOptions = {
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
-      callback(new Error('Origin not allowed by CORS'));
+      callback(new Error('Not allowed by CORS'));
     }
   },
-  credentials: true,
+  credentials: true, 
 };
 
 //core Middleware
 app.use(cors(corsOptions));
 app.use(helmet());
 app.use(express.json());
+app.use(cookieParser());
 
 if (process.env.NODE_ENV === 'development') {
   app.use(morgan('dev'));

@@ -78,30 +78,40 @@ const registerGuest = asyncHandler(async (req, res) => {
     const hotelUserId = req.user._id;
     const hotel = await HotelUser.findById(hotelUserId);
     if (!hotel) {
-        throw new ApiError(404, 'Hotel user not found');
+        throw new ApiError(404, 'hotel user not found');
     }
 
-    const filesMap = (req.files || []).reduce((map, file) => {
-        map[file.fieldname] = file;
+    // upload all files to cloudinary in parallel
+    const files = req.files || [];
+    if (files.length === 0) {
+        throw new ApiError(400, 'no files uploaded');
+    }
+
+    const uploadResults = await Promise.all(
+        files.map(file => uploadToCloudinary(file, 'guest-guard'))
+    );
+
+    // map by fieldname
+    const filesMap = uploadResults.reduce((map, item) => {
+        map[item.fieldname] = item;
         return map;
     }, {});
+
     const parseMaybeJson = (value, fallback) => {
         if (typeof value === 'string') {
-            try {
-                return JSON.parse(value);
-            } catch {
-                return fallback;
-            }
+            try { return JSON.parse(value); } catch { return fallback; }
         }
         return value ?? fallback;
     };
 
-    const idImageFrontURL = filesMap['idImageFront']?.path;
-    const idImageBackURL = filesMap['idImageBack']?.path;
-    const livePhotoURL = filesMap['livePhoto']?.path;
+    const idImageFrontURL = filesMap['idImageFront']?.url;
+    const idImageBackURL = filesMap['idImageBack']?.url;
+    const livePhotoURL = filesMap['livePhoto']?.url;
+
     if (!idImageFrontURL || !idImageBackURL || !livePhotoURL) {
         throw new ApiError(400, 'image upload failed. front, back, and live photos are required');
     }
+
     const primaryGuestData = {
         name: req.body.primaryGuestName,
         dob: req.body.primaryGuestDob,
@@ -116,51 +126,47 @@ const registerGuest = asyncHandler(async (req, res) => {
         },
         nationality: req.body.primaryGuestNationality
     };
+
     const stayDetailsData = {
         purposeOfVisit: req.body.purposeOfVisit,
         checkIn: req.body.checkIn,
         expectedCheckout: req.body.expectedCheckout,
         roomNumber: req.body.roomNumber,
     };
-   
+
     if (!stayDetailsData.roomNumber) {
-        throw new ApiError(400, 'Room number is required');
+        throw new ApiError(400, 'room number is required');
     }
+
     const roomToOccupy = hotel.rooms.find(r => r.roomNumber === stayDetailsData.roomNumber);
     if (!roomToOccupy) {
-        throw new ApiError(404, `Room "${stayDetailsData.roomNumber}" does not exist for this hotel.`);
+        throw new ApiError(404, `room "${stayDetailsData.roomNumber}" does not exist`);
     }
     if (roomToOccupy.status === 'Occupied') {
-        throw new ApiError(400, `Room "${stayDetailsData.roomNumber}" is already occupied.`);
+        throw new ApiError(400, `room "${stayDetailsData.roomNumber}" is already occupied`);
     }
 
     const accompanyingGuestsRaw = parseMaybeJson(req.body.accompanyingGuests, []);
-    const accompanyingGuests = {
-        adults: [],
-        children: [],
-    };
+    const accompanyingGuests = { adults: [], children: [] };
+
     (accompanyingGuestsRaw || []).forEach((guest, index) => {
         const processedGuest = {
             ...guest,
-            idImageFrontURL: filesMap[`accompanying_${index}_idImageFront`]?.path,
-            idImageBackURL: filesMap[`accompanying_${index}_idImageBack`]?.path,
-            livePhotoURL: filesMap[`accompanying_${index}_livePhoto`]?.path,
+            idImageFrontURL: filesMap[`accompanying_${index}_idImageFront`]?.url,
+            idImageBackURL: filesMap[`accompanying_${index}_idImageBack`]?.url,
+            livePhotoURL: filesMap[`accompanying_${index}_livePhoto`]?.url,
         };
+
         if (!guest.dob) {
-            logger.warn(`Accompanying guest ${guest.name} missing DOB, defaulting to adult.`);
             accompanyingGuests.adults.push(processedGuest);
         } else {
             const age = calculateAge(guest.dob);
-            if (age < 14) {
-                accompanyingGuests.children.push(processedGuest);
-            } else {
-                accompanyingGuests.adults.push(processedGuest);
-            }
+            age < 14
+                ? accompanyingGuests.children.push(processedGuest)
+                : accompanyingGuests.adults.push(processedGuest);
         }
     });
-   
-    logger.warn('google vision id verification is temporarily bypassed.');
-    
+
     const guest = await Guest.create({
         primaryGuest: primaryGuestData,
         idType: req.body.idType,
@@ -172,16 +178,16 @@ const registerGuest = asyncHandler(async (req, res) => {
         stayDetails: stayDetailsData,
         hotel: hotelUserId,
     });
-   
+
     roomToOccupy.status = 'Occupied';
     roomToOccupy.guestId = guest._id;
     await hotel.save();
-    
-    logger.info(`new guest registered (${guest.customerId}) in room ${stayDetailsData.roomNumber} at ${req.user.username}`);
-    res.status(201).json(new ApiResponse(201, guest, "guest registered successfully!"));
+
+    res.status(201).json(new ApiResponse(201, guest, 'guest registered successfully'));
 
     checkWatchlistAndNotify(guest, hotel);
 });
+
 
 const calculateAge = (dob) => {
     if (!dob) return 99; 
